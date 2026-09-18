@@ -20,6 +20,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -195,7 +196,11 @@ def partner_action_binding_digest(obj: dict[str, Any]) -> str:
     return sha256_digest(partner_action_binding_bytes(obj))
 
 
-def authorization_fields(result: dict[str, Any]) -> dict[str, Any]:
+def authorization_fields(
+    result: dict[str, Any],
+    *,
+    verification_time_utc: datetime | None = None,
+) -> dict[str, Any]:
     required = (
         "action",
         "release_authorized",
@@ -229,14 +234,19 @@ def authorization_fields(result: dict[str, Any]) -> dict[str, Any]:
     if expires is not None and not isinstance(expires, str):
         raise AdapterError("expires_at_utc must be a string when present")
     if expires:
-        from datetime import datetime, timezone
         try:
             exp = datetime.fromisoformat(expires.replace("Z", "+00:00"))
         except ValueError as exc:
             raise AdapterError("expires_at_utc is not ISO-8601") from exc
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) > exp:
+        if verification_time_utc is None:
+            verification_time_utc = datetime.now(timezone.utc)
+        elif not isinstance(verification_time_utc, datetime):
+            raise AdapterError("verification_time_utc must be a datetime")
+        elif verification_time_utc.tzinfo is None:
+            raise AdapterError("verification_time_utc must be timezone-aware")
+        if verification_time_utc.astimezone(timezone.utc) > exp:
             raise AdapterError("authorization has expired")
     return {
         "action": action,
@@ -284,13 +294,14 @@ def bind_authorization(
     claimed_digest: str | None = None,
     ontoguard_jwks_path: Path | None = None,
     allow_test_keys: bool | None = None,
+    verification_time_utc: datetime | None = None,
 ) -> dict[str, Any]:
     if not isinstance(result_bytes, (bytes, bytearray)) or not result_bytes:
         raise AdapterError("exact authorization result bytes are required")
     parsed = parse_signed_json_object(bytes(result_bytes), "authorization result bytes")
     if result is not None and not _objects_equal(parsed, result):
         raise AdapterError("supplied authorization object does not match exact signed bytes")
-    fields = authorization_fields(parsed)
+    fields = authorization_fields(parsed, verification_time_utc=verification_time_utc)
     raw = bytes(result_bytes)
     digest = sha256_digest(raw)
     if claimed_digest is not None and digest != _digest_str(claimed_digest, "claimed_digest"):
@@ -314,8 +325,15 @@ def bind_authorization(
     }
 
 
-def classify(result: dict[str, Any], execution_receipt: dict[str, Any] | None = None) -> str:
-    action = authorization_fields(result)["action"]
+def classify(
+    result: dict[str, Any],
+    execution_receipt: dict[str, Any] | None = None,
+    *,
+    verification_time_utc: datetime | None = None,
+) -> str:
+    action = authorization_fields(
+        result, verification_time_utc=verification_time_utc
+    )["action"]
     receipt_executed = bool(execution_receipt and execution_receipt.get("executed"))
     if action in {"BLOCK", "ESCALATE"}:
         if receipt_executed:
@@ -560,6 +578,7 @@ def project(
     ontoguard_jwks_path: Path | None = None,
     execution_jwks_path: Path | None = None,
     allow_test_keys: bool | None = None,
+    verification_time_utc: datetime | None = None,
 ) -> dict[str, Any]:
     bound = bind_authorization(
         result,
@@ -570,8 +589,13 @@ def project(
         claimed_digest=claimed_digest,
         ontoguard_jwks_path=ontoguard_jwks_path,
         allow_test_keys=allow_test_keys,
+        verification_time_utc=verification_time_utc,
     )
-    state = classify(result, execution_receipt)
+    state = classify(
+        result,
+        execution_receipt,
+        verification_time_utc=verification_time_utc,
+    )
     out: dict[str, Any] = {
         "adapter": "ontoguard-decision-authorization",
         "adapter_version": ADAPTER_VERSION,

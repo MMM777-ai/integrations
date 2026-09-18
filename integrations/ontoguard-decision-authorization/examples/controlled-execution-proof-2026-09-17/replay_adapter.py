@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+HISTORICAL_VERIFICATION_TIME = datetime(2026, 9, 18, 0, 0, tzinfo=timezone.utc)
 CANDIDATES = [
     ROOT.parents[1],
     ROOT.parent,
@@ -50,6 +52,7 @@ def main() -> int:
         ontoguard_jwks_path=ROOT / "positive/ontoguard_jwks.json",
         execution_jwks_path=ROOT / "positive/execution_jwks.json",
         allow_test_keys=True,
+        verification_time_utc=HISTORICAL_VERIFICATION_TIME,
     )
     bound = result["authorization"]
     print("[PASS] actual OntoGuard Marketplace adapter accepted authorization")

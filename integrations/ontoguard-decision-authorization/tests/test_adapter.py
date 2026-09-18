@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 import ontoguard_trace as og
 
 FIXTURES = Path(__file__).resolve().parents[1] / "examples" / "fixtures"
+FIXED_VERIFICATION_TIME = datetime(2026, 9, 18, 0, 0, tzinfo=timezone.utc)
 
 
 def _load(name: str) -> dict:
@@ -16,6 +18,7 @@ def _load(name: str) -> dict:
 
 
 def _project(fixture: dict, **kwargs):
+    kwargs.setdefault("verification_time_utc", FIXED_VERIFICATION_TIME)
     return og.project(
         fixture["authorization_result"],
         signature_b64url=fixture["authorization_signature"],
@@ -38,7 +41,14 @@ def _project(fixture: dict, **kwargs):
 )
 def test_non_execution_states(name: str, expected: str) -> None:
     fixture = _load(name)
-    assert og.classify(fixture["authorization_result"], fixture.get("execution_receipt")) == expected
+    assert (
+        og.classify(
+            fixture["authorization_result"],
+            fixture.get("execution_receipt"),
+            verification_time_utc=FIXED_VERIFICATION_TIME,
+        )
+        == expected
+    )
     result = _project(fixture)
     assert result["trace_record_emitted"] is False
     assert result["trace_record"] is None
@@ -56,6 +66,7 @@ def test_exact_signed_bytes_are_required_and_not_reconstructed() -> None:
             public_jwk=fixture["authorization_public_jwk"],
             result_bytes=raw,
             allow_test_keys=True,
+            verification_time_utc=FIXED_VERIFICATION_TIME,
         )
 
 
@@ -86,6 +97,7 @@ def test_digest_is_recomputed_not_trusted() -> None:
             result_bytes=fixture["authorization_result_exact"].encode("utf-8"),
             execution_receipt=fixture["execution_receipt"],
             allow_test_keys=True,
+            verification_time_utc=FIXED_VERIFICATION_TIME,
         )
 
 
@@ -101,6 +113,7 @@ def test_tampered_result_bytes_fail_signature() -> None:
             result_bytes=json.dumps(tampered, sort_keys=True, separators=(",", ":")).encode(),
             execution_receipt=fixture["execution_receipt"],
             allow_test_keys=True,
+            verification_time_utc=FIXED_VERIFICATION_TIME,
         )
 
 
@@ -140,7 +153,11 @@ def test_block_with_executed_receipt_is_rejected() -> None:
         "build_provenance": {"digest": "sha256:" + "ee" * 32, "slsa_level": 0},
     }
     with pytest.raises(og.AdapterError, match="cannot be paired with executed=true"):
-        og.classify(fixture["authorization_result"], receipt)
+        og.classify(
+            fixture["authorization_result"],
+            receipt,
+            verification_time_utc=FIXED_VERIFICATION_TIME,
+        )
 
 
 def test_allow_does_not_prove_execution_without_receipt() -> None:
@@ -153,6 +170,7 @@ def test_allow_does_not_prove_execution_without_receipt() -> None:
         result_bytes=fixture["authorization_result_exact"].encode("utf-8"),
         execution_receipt=None,
         allow_test_keys=True,
+        verification_time_utc=FIXED_VERIFICATION_TIME,
     )
     assert result["state"] == "ALLOW_NO_EXECUTION_YET"
     assert result["trace_record_emitted"] is False
@@ -180,6 +198,7 @@ def test_untrusted_authorization_jwk_is_rejected() -> None:
             public_jwk=jwk,
             result_bytes=fixture["authorization_result_exact"].encode("utf-8"),
             allow_test_keys=True,
+            verification_time_utc=FIXED_VERIFICATION_TIME,
         )
 
 
@@ -188,7 +207,11 @@ def test_allow_without_release_authorized_cannot_emit() -> None:
     result = dict(fixture["authorization_result"])
     result["release_authorized"] = False
     with pytest.raises(og.AdapterError, match="release_authorized"):
-        og.classify(result, fixture["execution_receipt"] or {"executed": True})
+        og.classify(
+            result,
+            fixture["execution_receipt"] or {"executed": True},
+            verification_time_utc=FIXED_VERIFICATION_TIME,
+        )
 
 
 def test_unsigned_output_is_not_a_trace_record() -> None:
@@ -244,6 +267,7 @@ def test_expired_authorization_is_rejected() -> None:
             public_jwk=fixture["authorization_public_jwk"],
             result_bytes=raw,
             allow_test_keys=True,
+            verification_time_utc=FIXED_VERIFICATION_TIME,
         )
 
 
