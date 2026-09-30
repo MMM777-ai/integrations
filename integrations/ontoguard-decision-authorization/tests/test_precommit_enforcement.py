@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 
 PROOF = Path(__file__).resolve().parents[1] / "examples" / "controlled-execution-proof-2026-09-17"
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "precommit-enforcement"
@@ -105,6 +105,15 @@ def test_bypass_without_verified_authorization_cannot_commit(tmp_path: Path) -> 
     )
     assert digest_only["result"] == "EXECUTION_REFUSED"
     assert executor.store.commit_count == 0
+
+    direct_digest = executor.attempt(
+        ACTION_BLOCK_260K,
+        partner_action_binding_digest(ACTION_BLOCK_260K),
+    )
+    assert direct_digest["result"] == "EXECUTION_REFUSED"
+    assert "signed OntoGuard authorization is required" in direct_digest["reason"]
+    assert executor.store.commit_count == 0
+    assert executor.store.protected_effect_formed is False
 
     allow = authorizer.mint(ACTION_ALLOW_250K, "ALLOW")
     tampered = dict(allow)
@@ -210,6 +219,60 @@ def test_expired_untrusted_malformed_refuse(tmp_path: Path) -> None:
     )
     assert malformed.permit is False
     assert "partner action binding missing" in malformed.reason
+
+
+
+def test_malformed_cross_border_values_fail_closed_before_commit(tmp_path: Path) -> None:
+    authorizer, jwks = _ctx(tmp_path)
+    allow = authorizer.mint(ACTION_ALLOW_250K, "ALLOW")
+
+    malformed_values = ("false", 1, ["false"], {"value": False})
+    for malformed_value in malformed_values:
+        proposed = dict(ACTION_ALLOW_250K)
+        proposed["cross_border"] = malformed_value
+        executor = ControlledExecutor()
+
+        decision = evaluate_precommit(
+            proposed,
+            result_bytes=allow["result_bytes"],
+            signature_b64url=allow["signature"],
+            public_jwk=allow["public_jwk"],
+            ontoguard_jwks_path=jwks,
+            allow_test_keys=True,
+        )
+        assert decision.permit is False
+        assert "cross_border must be a boolean" in decision.reason
+
+        attempted = attempt_protected(
+            executor,
+            proposed,
+            minted=allow,
+            ontoguard_jwks_path=jwks,
+            allow_test_keys=True,
+        )
+        assert attempted["result"] == "EXECUTION_REFUSED"
+        assert executor.store.commit_count == 0
+        assert executor.store.protected_effect_formed is False
+
+
+def test_unbound_extra_action_field_fails_closed(tmp_path: Path) -> None:
+    authorizer, jwks = _ctx(tmp_path)
+    allow = authorizer.mint(ACTION_ALLOW_250K, "ALLOW")
+    proposed = dict(ACTION_ALLOW_250K)
+    proposed["unbound_instruction"] = "execute anyway"
+
+    executor = ControlledExecutor()
+    attempted = attempt_protected(
+        executor,
+        proposed,
+        minted=allow,
+        ontoguard_jwks_path=jwks,
+        allow_test_keys=True,
+    )
+    assert attempted["result"] == "EXECUTION_REFUSED"
+    assert "unexpected fields" in attempted["reason"]
+    assert executor.store.commit_count == 0
+    assert executor.store.protected_effect_formed is False
 
 
 def test_default_rejects_test_keys(tmp_path: Path) -> None:

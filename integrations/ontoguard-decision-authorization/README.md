@@ -93,10 +93,12 @@ Treat them as dated evidence, not as unexpiring production objects.
 
 This repository does not contain OntoGuard's semantic authorization engine.
 A downstream enforcement runtime may consume a current signed OntoGuard
-authorization before protected execution. The enforcement runtime independently
-verifies the authorization, exact-action binding, validity window and release
-state. A materially different action, BLOCK, ESCALATE, expired authorization,
-invalid signature or binding mismatch must not proceed.
+authorization before protected execution. The bounded example strictly
+validates the proposed partner action, verifies the signed authorization and
+exact-action binding, and re-verifies those conditions at the controlled
+executor's commit boundary. A caller-computed digest alone is not authority.
+A materially different or malformed action, BLOCK, ESCALATE, expired
+authorization, invalid signature or binding mismatch must not proceed.
 
 OntoGuard determines semantic authorization. The external runtime retains
 enforcement. TRACE records execution evidence only after execution is

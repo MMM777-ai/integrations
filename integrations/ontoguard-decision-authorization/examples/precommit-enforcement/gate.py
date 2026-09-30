@@ -36,6 +36,7 @@ from ontoguard_trace import (
     partner_action_binding_digest,
     partner_action_binding_object,
     sha256_digest,
+    validate_partner_action_binding_object,
 )
 
 
@@ -81,6 +82,7 @@ class GateDecision:
     reason: str
     action: str | None = None
     action_binding_digest: str | None = None
+    validated_action: dict[str, Any] | None = None
 
 
 class SignedTestAuthorizer:
@@ -101,12 +103,13 @@ class SignedTestAuthorizer:
     def mint(self, action_obj: dict[str, Any], decision: str = "ALLOW") -> dict[str, Any]:
         if decision not in {"ALLOW", "BLOCK", "ESCALATE"}:
             raise ValueError("decision must be ALLOW, BLOCK, or ESCALATE")
-        digest = partner_action_binding_digest(action_obj)
+        validated_action = validate_partner_action_binding_object(action_obj)
+        digest = partner_action_binding_digest(validated_action)
         now = datetime.now(timezone.utc)
         issued = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
         expires = (now + timedelta(days=7)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         seed = json.dumps(
-            {"decision": decision, "action": action_obj},
+            {"decision": decision, "action": validated_action},
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -149,9 +152,15 @@ def evaluate_precommit(
     verification_time_utc: datetime | None = None,
     allow_test_keys: bool | None = None,
 ) -> GateDecision:
-    """Fail closed. Does not execute."""
+    """Fail closed after strict action validation. Does not execute."""
+    try:
+        validated_action = validate_partner_action_binding_object(proposed_action)
+    except (AdapterError, TypeError, ValueError) as exc:
+        return GateDecision(permit=False, reason=str(exc))
+
     if result_bytes is None or signature_b64url is None or public_jwk is None:
         return GateDecision(permit=False, reason="no OntoGuard authorization")
+
     try:
         bound = bind_authorization(
             result_bytes=result_bytes,
@@ -161,28 +170,34 @@ def evaluate_precommit(
             allow_test_keys=allow_test_keys,
             verification_time_utc=verification_time_utc,
         )
-        proposed_digest = partner_action_binding_digest(proposed_action)
+        proposed_digest = partner_action_binding_digest(validated_action)
     except (AdapterError, TypeError, ValueError) as exc:
         return GateDecision(permit=False, reason=str(exc))
+
     if proposed_digest != bound["action_binding_digest"]:
         return GateDecision(
             permit=False,
             reason="payload mismatch: proposed action is not the bound movement",
             action=bound["action"],
             action_binding_digest=bound["action_binding_digest"],
+            validated_action=validated_action,
         )
+
     if bound["action"] != "ALLOW" or bound["release_authorized"] is not True:
         return GateDecision(
             permit=False,
             reason=f"{bound['action']} is not a releasable authorization",
             action=bound["action"],
             action_binding_digest=bound["action_binding_digest"],
+            validated_action=validated_action,
         )
+
     return GateDecision(
         permit=True,
         reason="ALLOW + exact action binding",
         action=bound["action"],
         action_binding_digest=bound["action_binding_digest"],
+        validated_action=validated_action,
     )
 
 
@@ -195,7 +210,7 @@ def attempt_protected(
     allow_test_keys: bool | None = None,
     verification_time_utc: datetime | None = None,
 ) -> dict[str, Any]:
-    """Single protected entry point. Digest-only callers cannot commit."""
+    """Protected wrapper; the executor independently re-verifies at commit."""
     if minted is None:
         decision = GateDecision(permit=False, reason="no OntoGuard authorization")
     else:
@@ -208,6 +223,7 @@ def attempt_protected(
             allow_test_keys=allow_test_keys,
             verification_time_utc=verification_time_utc,
         )
+
     if not decision.permit:
         return {
             "result": "EXECUTION_REFUSED",
@@ -217,4 +233,11 @@ def attempt_protected(
             "commit_count": executor.store.commit_count,
             "status": executor.store.status,
         }
-    return executor.attempt(proposed_action, decision.action_binding_digest)
+
+    return executor.attempt(
+        decision.validated_action,
+        minted,
+        ontoguard_jwks_path=ontoguard_jwks_path,
+        allow_test_keys=allow_test_keys,
+        verification_time_utc=verification_time_utc,
+    )

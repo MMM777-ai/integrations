@@ -9,11 +9,13 @@ destination/tool already admitted by the enforcement runtime
                 ↓
 exact proposed request
                 ↓
+strictly validate the proposed action
+                ↓
 verify signed OntoGuard handoff
                 ↓
 verify exact action-binding digest
                 ↓
-ALLOW + exact binding → enforcement runtime may continue
+ALLOW + exact binding → controlled commit boundary re-verifies
 BLOCK / ESCALATE / mismatch / expired / tampered /
 untrusted / missing authorization → DENY
                 ↓
@@ -37,12 +39,15 @@ Recovery Standing, semantic packs, or Governing Basis logic.
 ## What this example proves
 
 An external enforcement runtime can consume a signed OntoGuard decision
-before protected execution. The decision is bound to the exact proposed
-action. ALLOW for one action does not authorize a materially different
-action. BLOCK and ESCALATE do not release. Bypass attempts in this
-bounded harness — no authorization, digest-only caller, tampered or
-untrusted decision, BLOCK, ESCALATE, or ALLOW for a different action —
-do not form the protected effect (`commit_count` stays 0).
+before protected execution. The proposed action is strictly validated before
+binding and the same validated representation reaches the controlled commit
+boundary. The decision is bound to that exact action. ALLOW for one action
+does not authorize a materially different action. BLOCK and ESCALATE do not
+release. The controlled executor independently re-verifies the signed
+authorization at commit, so a caller-computed digest alone is not authority.
+Malformed action types, no authorization, digest-only calls, tampered or
+untrusted decisions, BLOCK, ESCALATE, or ALLOW for a different action do not
+form the protected effect (`commit_count` stays 0).
 
 ## What this example does not prove
 
