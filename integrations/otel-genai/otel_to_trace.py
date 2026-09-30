@@ -107,6 +107,7 @@ def build_from_spans(
     *,
     subject: str,
     policy_bundle: bytes,
+    enforcement_mode: str,
     workload_digest: str,
     jwk: dict[str, Any],
     producer: str,
@@ -162,7 +163,7 @@ def build_from_spans(
         subject=subject,
         model_provider=provider,
         model_id=model_id,
-        policy=PolicyEvidence(bundle=policy_bundle),
+        policy=PolicyEvidence(bundle=policy_bundle, enforcement_mode=enforcement_mode),
         data_class=data_class,
         workload_digest=workload_digest,
         transcript_bytes=_transcript(tool_spans) if tool_spans else None,
@@ -176,6 +177,13 @@ def main() -> int:
     ap.add_argument("spans", help="JSON file: a list of GenAI spans for one conversation")
     ap.add_argument("--subject", required=True, help="spiffe:// or did: identity of the workload")
     ap.add_argument("--policy-bundle", required=True, help="File holding the policy bytes in force")
+    ap.add_argument(
+        "--enforcement-mode",
+        required=True,
+        choices=["declared", "enforce", "advisory", "silent"],
+        help="declared unless the exporting system enforced the policy; no default "
+        "(TRACE spec section 4.3)",
+    )
     ap.add_argument("--workload-digest", required=True, help="sha256:/sha384: digest of the artifact")
     ap.add_argument("--jwk", required=True, help="File holding the public confirmation key (JWK)")
     ap.add_argument("--producer", default="opentelemetry-genai", help="System that emitted the spans")
@@ -197,6 +205,7 @@ def main() -> int:
             spans,
             subject=args.subject,
             policy_bundle=pathlib.Path(args.policy_bundle).read_bytes(),
+            enforcement_mode=args.enforcement_mode,
             workload_digest=args.workload_digest,
             jwk=json.loads(pathlib.Path(args.jwk).read_text()),
             producer=args.producer,

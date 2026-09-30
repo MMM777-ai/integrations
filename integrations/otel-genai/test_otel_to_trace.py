@@ -51,6 +51,7 @@ def build(spans, **over):
     kwargs = dict(
         subject="spiffe://example.org/agent/support-bot",
         policy_bundle=b'{"rules":["deny-egress"]}',
+        enforcement_mode="declared",
         workload_digest=DIGEST,
         jwk=JWK,
         producer="otel-collector/1.0",

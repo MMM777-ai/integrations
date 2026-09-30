@@ -97,7 +97,7 @@ def _record(**overrides) -> dict:
         subject="spiffe://example.org/agent/imported",
         model_provider="anthropic",
         model_id="m",
-        policy=PolicyEvidence(bundle=b"policy"),
+        policy=PolicyEvidence(bundle=b"policy", enforcement_mode="declared"),
         data_class="internal",
         jwk={"kty": "OKP"},
         workload_digest=WORKLOAD,

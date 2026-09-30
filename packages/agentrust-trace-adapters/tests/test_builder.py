@@ -29,7 +29,7 @@ def _kwargs(**overrides):
         subject="spiffe://example.org/agent/imported",
         model_provider="anthropic",
         model_id="claude-sonnet-4-6",
-        policy=PolicyEvidence(bundle=b'{"rules": []}'),
+        policy=PolicyEvidence(bundle=b'{"rules": []}', enforcement_mode="declared"),
         data_class="internal",
         jwk=JWK,
         workload_digest=DIGEST,
@@ -74,11 +74,11 @@ def test_self_origin_is_refused() -> None:
 
 def test_policy_needs_real_bundle_bytes() -> None:
     with pytest.raises(MissingEvidence, match="policy bundle bytes"):
-        PolicyEvidence(bundle=b"")
+        PolicyEvidence(bundle=b"", enforcement_mode="declared")
 
 
 def test_policy_bundle_hash_is_over_the_bundle() -> None:
-    policy = PolicyEvidence(bundle=b'{"rules": []}')
+    policy = PolicyEvidence(bundle=b'{"rules": []}', enforcement_mode="declared")
     assert policy.bundle_hash == digest_bytes(b'{"rules": []}')
 
 
@@ -152,7 +152,7 @@ def test_measurement_is_deterministic_over_its_inputs() -> None:
     a = build_record(**_kwargs())["runtime"]["measurement"]
     b = build_record(**_kwargs())["runtime"]["measurement"]
     assert a == b
-    c = build_record(**_kwargs(policy=PolicyEvidence(bundle=b'{"rules": [1]}')))
+    c = build_record(**_kwargs(policy=PolicyEvidence(bundle=b'{"rules": [1]}', enforcement_mode="declared")))
     assert c["runtime"]["measurement"] != a
 
 
@@ -174,6 +174,21 @@ def test_ingested_at_rejects_milliseconds() -> None:
 def test_enforcement_mode_is_closed() -> None:
     with pytest.raises(ValueError, match="enforcement_mode"):
         PolicyEvidence(bundle=b"{}", enforcement_mode="monitor")
+
+
+def test_enforcement_mode_has_no_default() -> None:
+    # Spec section 4.3: declared MUST NOT be a default, and enforce would claim
+    # enforcement nobody established. The caller has to say which is true.
+    with pytest.raises(TypeError, match="enforcement_mode"):
+        PolicyEvidence(bundle=b'{"rules": []}')  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("mode", ["enforce", "advisory", "silent", "declared"])
+def test_policy_preserves_explicit_enforcement_modes(mode: str) -> None:
+    policy = PolicyEvidence(bundle=b'{"rules": []}', enforcement_mode=mode)
+    assert policy.enforcement_mode == mode
+    record = build_record(**_kwargs(policy=policy))
+    assert record["policy"]["enforcement_mode"] == mode
 
 
 # --- the test the previous adapter did not have ---------------------------
